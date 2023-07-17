@@ -1,0 +1,76 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
+
+#define NUM_CHILDREN 3
+
+int child_pipes[NUM_CHILDREN][2];
+
+void child_interrupt_handler(int sig) {
+    printf("Child %d: Interrupt received!\n", getpid());
+}
+
+int main() {
+    pid_t child_pids[NUM_CHILDREN];
+    int i;
+    
+    // Create pipes for communication
+    for (i = 0; i < NUM_CHILDREN; i++) {
+        if (pipe(child_pipes[i]) == -1) {
+            perror("pipe");
+            exit(1);
+        }
+    }
+    
+    for (i = 0; i < NUM_CHILDREN; i++) {
+        pid_t pid = fork();
+        
+        if (pid == -1) {
+            perror("fork");
+            exit(1);
+        }
+        
+        if (pid == 0) {
+            // Child process
+            close(child_pipes[i][1]);  // Close write end of the pipe
+            
+            // Set up interrupt handler
+            signal(SIGINT, child_interrupt_handler);
+            
+            // Read message from parent
+            char message[100];
+            int bytes_read = read(child_pipes[i][0], message, sizeof(message));
+            if (bytes_read > 0) {
+                printf("Child %d: Message from parent: %s\n", getpid(), message);
+            }
+            
+            close(child_pipes[i][0]);  // Close read end of the pipe
+            exit(0);
+        } else {
+            // Parent process
+            child_pids[i] = pid;
+            close(child_pipes[i][0]);  // Close read end of the pipe
+        }
+    }
+    
+    // Parent process
+    for (i = 0; i < NUM_CHILDREN; i++) {
+        close(child_pipes[i][0]);  // Close read end of the pipe
+        
+        // Send message to child
+        char message[100];
+        snprintf(message, sizeof(message), "Hello from parent! My PID is %d", getpid());
+        write(child_pipes[i][1], message, strlen(message) + 1);
+        
+        close(child_pipes[i][1]);  // Close write end of the pipe
+    }
+    
+    // Wait for child processes to complete
+    for (i = 0; i < NUM_CHILDREN; i++) {
+        waitpid(child_pids[i], NULL, 0);
+    }
+    
+    return 0;
+}
